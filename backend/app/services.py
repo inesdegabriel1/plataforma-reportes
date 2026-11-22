@@ -396,75 +396,104 @@ def _oil_rows(series_rows, flights, legacy_rows):
     return rows if rows else legacy_rows
 
 
-def _oil_trend(rows: list[dict]):
-    """(consumo reciente, consumo de referencia) en qt/h, ponderado por horas de cada tramo."""
+MESES = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
+
+
+def _n(v: float, dec: int = 1) -> str:
+    """Número con coma decimal, como en el resto de la web."""
+    return f"{v:.{dec}f}".replace(".", ",")
+
+
+def _mes(d: datetime) -> str:
+    return f"{MESES[d.month - 1]} {d.year}"
+
+
+def _ref_window():
     now = datetime.now()
-    ref_from = now - timedelta(days=RULES["referencia_desde_dias"])
-    ref_to = now - timedelta(days=RULES["referencia_hasta_dias"])
-    rec_from = now - timedelta(days=RULES.get("aceite_recientes_dias", 90))
+    return now - timedelta(days=RULES["referencia_desde_dias"]), now - timedelta(days=RULES["referencia_hasta_dias"])
+
+
+def _ref_text() -> str:
+    a, b = _ref_window()
+    return f"{_mes(a)} – {_mes(b)}"
+
+
+def _oil_trend(rows: list[dict]) -> dict:
+    """Consumo reciente y de referencia (qt/h), ponderado por las horas de cada tramo."""
+    ref_from, ref_to = _ref_window()
+    rec_from = datetime.now() - timedelta(days=RULES.get("aceite_recientes_dias", 90))
     min_seg = RULES.get("aceite_minimo_tramos", 3)
 
     def wavg(sel):
-        if len(sel) < min_seg:
-            return None
         if all("horas" in r for r in sel):
             tot = sum(r["horas"] for r in sel)
             return sum(r["rate"] * r["horas"] for r in sel) / tot if tot else None
         return mean(r["rate"] for r in sel)
 
     pts = [r for r in rows if to_dt(r["fecha"]) and num(r.get("rate")) is not None]
-    rec = wavg([r for r in pts if to_dt(r["fecha"]) >= rec_from])
-    base = wavg([r for r in pts if ref_from <= to_dt(r["fecha"]) < ref_to])
-    return None if rec is None or base is None else (rec, base)
+    rec = [r for r in pts if to_dt(r["fecha"]) >= rec_from]
+    base = [r for r in pts if ref_from <= to_dt(r["fecha"]) < ref_to]
+    ok = len(rec) >= min_seg and len(base) >= min_seg
+    return dict(ok=ok, n_rec=len(rec), n_base=len(base), min=min_seg,
+                rec=wavg(rec) if ok else None, base=wavg(base) if ok else None)
 
 
 # --------------------------------------------------------------------------- salud
-def _trend(rows: list[dict], field: str):
-    """(media últimos N vuelos, media del periodo de referencia) o None si faltan datos."""
-    now = datetime.now()
-    ref_from = now - timedelta(days=RULES["referencia_desde_dias"])
-    ref_to = now - timedelta(days=RULES["referencia_hasta_dias"])
+def _trend(rows: list[dict], field: str) -> dict:
+    """Media de los últimos N vuelos frente a la media del periodo de referencia."""
+    ref_from, ref_to = _ref_window()
     pts = [(to_dt(r["fecha"]), num(r.get(field))) for r in rows]
     pts = sorted((p for p in pts if p[0] and p[1] is not None), key=lambda p: p[0])
     n_rec = RULES["vuelos_recientes"]
-    recent = [v for d, v in pts[-n_rec:] if d > ref_to]
+    recent = [(d, v) for d, v in pts[-n_rec:] if d > ref_to]
     base = [v for d, v in pts if ref_from <= d < ref_to]
-    if len(recent) < n_rec // 2 or len(base) < RULES["minimo_vuelos_referencia"]:
-        return None
-    return mean(recent), mean(base)
+    ok = len(recent) >= n_rec // 2 and len(base) >= RULES["minimo_vuelos_referencia"]
+    return dict(ok=ok, n_rec=len(recent), n_base=len(base),
+                rec=mean(v for _, v in recent) if ok else None, base=mean(base) if ok else None,
+                rec_desde=recent[0][0] if recent else None, rec_hasta=recent[-1][0] if recent else None)
 
 
 def health(series_rows: list[dict], oil_rows: list[dict], events: list[dict]) -> dict:
-    """Semáforo por motor. Compara los últimos N vuelos con los N anteriores (referencia)."""
+    """Semáforo por motor: cada parámetro se compara con el propio motor hace 6-12 meses."""
     level = 0
     reasons = []
     names = ["verde", "ambar", "rojo"]
+    ref = _ref_text()
 
     def bump(lv, msg):
         nonlocal level
         level = max(level, lv)
         reasons.append(dict(nivel=names[lv], texto=msg))
 
-    rows = series_rows
+    n_rec, n_min = RULES["vuelos_recientes"], RULES["minimo_vuelos_referencia"]
     for field, label, amb, red in (
         ("crz_egt", "EGT crucero", RULES["egt_crucero_delta_ambar"], RULES["egt_crucero_delta_rojo"]),
         ("tof_egt", "EGT despegue", RULES["egt_despegue_delta_ambar"], RULES["egt_despegue_delta_rojo"]),
     ):
-        t = _trend(rows, field)
-        if t is None:
-            reasons.append(dict(nivel="sin_datos", texto=f"{label}: sin datos suficientes"))
+        t = _trend(series_rows, field)
+        if not t["ok"]:
+            reasons.append(dict(nivel="sin_datos", texto=(
+                f"{label}: sin datos suficientes ({t['n_rec']} vuelos recientes y {t['n_base']} en {ref}; "
+                f"hacen falta {n_rec // 2} y {n_min})")))
             continue
-        delta = t[0] - t[1]
+        delta = t["rec"] - t["base"]
         lv = 2 if delta >= red else 1 if delta >= amb else 0
-        bump(lv, f"{label}: {delta:+.1f} °C respecto a la referencia")
+        periodo = f"{t['rec_desde']:%d/%m}–{t['rec_hasta']:%d/%m}"
+        bump(lv, f"{label}: {_n(t['rec'])} °C (últimos {t['n_rec']} vuelos, {periodo}) frente a "
+                 f"{_n(t['base'])} °C ({ref}) → {'+' if delta >= 0 else '−'}{_n(abs(delta))} °C")
 
     t = _oil_trend(oil_rows)
-    if t is None or t[1] <= 0:
-        reasons.append(dict(nivel="sin_datos", texto="Consumo de aceite: sin datos suficientes"))
+    dias = RULES.get("aceite_recientes_dias", 90)
+    if not t["ok"] or not t["base"] or t["base"] <= 0:
+        unidad = "tramos entre rellenos" if all("horas" in r for r in oil_rows) else "vuelos con dato"
+        detalle = (f"{t['n_rec']} {unidad} en los últimos {dias} días y {t['n_base']} en {ref}; "
+                   f"hacen falta {t['min']} y {t['min']}") if oil_rows else "este avión no registra OQ"
+        reasons.append(dict(nivel="sin_datos", texto=f"Consumo de aceite: sin datos suficientes ({detalle})"))
     else:
-        ratio = t[0] / t[1]
+        ratio = t["rec"] / t["base"]
         lv = 2 if ratio >= RULES["aceite_ratio_rojo"] else 1 if ratio >= RULES["aceite_ratio_ambar"] else 0
-        bump(lv, f"Consumo de aceite: {t[0]:.2f} qt/h, ×{ratio:.2f} respecto a la referencia ({t[1]:.2f})")
+        bump(lv, f"Consumo de aceite: {_n(t['rec'], 2)} qt/h (últimos {dias} días) frente a "
+                 f"{_n(t['base'], 2)} qt/h ({ref}) → ×{_n(ratio, 2)}")
 
     since = datetime.now() - timedelta(days=RULES["eventos_dias"])
     n_ev = sum(1 for e in events if e["de_motor"] and e["fecha"] and e["fecha"] >= since)

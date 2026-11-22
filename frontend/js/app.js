@@ -358,7 +358,7 @@ function eventsTable(eventos, mode) {
 
 function healthCard(salud) {
   return `<ul class="reasons">${salud.motivos.map((m) => `<li>${badge(m.nivel)} ${esc(m.texto)}</li>`).join("")}</ul>
-    <p class="hint">Media de los últimos vuelos frente a la referencia de hace 6–12 meses. Umbrales en <code>backend/app/health_rules.json</code>.</p>`;
+    <p class="hint">Referencia = el propio motor hace 6–12 meses. Se compara con la media de sus últimos vuelos. Vigilar: EGT +10 °C crucero / +15 °C despegue, aceite ×1,5. Alerta: +20 / +30 °C, aceite ×2. El EGT de despegue varía con la temperatura exterior y el empuje: confírmalo en la gráfica. Umbrales en <code>backend/app/health_rules.json</code>.</p>`;
 }
 
 function sourceNote(tipo, hasSeries) {
