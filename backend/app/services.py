@@ -3,7 +3,7 @@ import json
 import threading
 import time
 from datetime import date, datetime, timedelta
-from statistics import mean
+from statistics import mean, median
 
 from . import config
 from .reports import parse_a321, parse_atr02, sn_key
@@ -310,6 +310,114 @@ def normalize_events(rows: list[dict]) -> list[dict]:
     return out
 
 
+# --------------------------------------------------------------------------- aceite (OQ / OT)
+OQ_RANGE = (5.0, 30.0)     # lecturas de OQ fuera de este rango se descartan (sensor)
+OT_MAX = 200.0             # OT por encima de esto es un valor inválido del QAR (p. ej. 1023)
+REFILL_QT = 1.0            # subida de la mediana diaria de OQ que se considera relleno
+SEG_MAX_GAP_DAYS = 10      # un hueco mayor también corta el tramo
+SEG_MIN_DAYS, SEG_MIN_HOURS = 3, 5.0
+
+
+def clean_oil(rows: list[dict]) -> list[dict]:
+    """Quita lecturas de OQ y OT imposibles para que no deformen las gráficas."""
+    for r in rows:
+        oq = num(r.get("crz_oq"))
+        if oq is not None and not (OQ_RANGE[0] < oq < OQ_RANGE[1]):
+            r["crz_oq"] = None
+        for f in ("crz_ot", "tof_ot"):
+            v = num(r.get(f))
+            if v is not None and not (0 < v < OT_MAX):
+                r[f] = None
+    return rows
+
+
+def oil_consumption(series_rows: list[dict], flights: list[dict]) -> list[dict]:
+    """Consumo de aceite (qt/h) a partir del OQ de crucero.
+
+    Lectura a lectura el OQ tiene más ruido (±2 qt) que lo que se consume en un vuelo, así que:
+    1) mediana diaria de OQ por motor; 2) se corta en tramos cuando la mediana sube (relleno)
+    o hay un hueco largo; 3) en cada tramo, pendiente OQ frente a horas de vuelo acumuladas
+    del motor. Cada tramo da un punto con fecha = último día del tramo.
+    `flights`: vuelos con fecha, ft (min) y sn, para acumular horas de cada motor.
+    """
+    cum_by_sn: dict[str, dict] = {}
+    for f in sorted(flights, key=lambda f: to_dt(f["fecha"])):
+        k = sn_key(f.get("sn"))
+        if not k:
+            continue
+        d = cum_by_sn.setdefault(k, {"_h": 0.0})
+        d["_h"] += hours(f.get("ft"))
+        d[to_dt(f["fecha"]).date()] = d["_h"]
+
+    daily: dict[tuple, dict] = {}
+    for r in series_rows:
+        oq = num(r.get("crz_oq"))
+        k = sn_key(r.get("sn"))
+        if oq is None or not k or not (OQ_RANGE[0] < oq < OQ_RANGE[1]):
+            continue
+        g = daily.setdefault(k, {"sn": r["sn"], "pos": r.get("pos"), "mat": r.get("matricula"), "days": {}})
+        g["days"].setdefault(to_dt(r["fecha"]).date(), []).append(oq)
+
+    out = []
+    for k, g in daily.items():
+        cum = cum_by_sn.get(k, {})
+        pts = [(d, cum[d], median(v)) for d, v in sorted(g["days"].items()) if d in cum]
+        segs, cur = [], []
+        for p in pts:
+            if cur and (p[2] - cur[-1][2] > REFILL_QT or (p[0] - cur[-1][0]).days > SEG_MAX_GAP_DAYS):
+                segs.append(cur)
+                cur = []
+            cur.append(p)
+        if cur:
+            segs.append(cur)
+        for s in segs:
+            xs, ys = [p[1] for p in s], [p[2] for p in s]
+            h = xs[-1] - xs[0]
+            if len(s) < SEG_MIN_DAYS or h < SEG_MIN_HOURS:
+                continue
+            mx, my = mean(xs), mean(ys)
+            sxx = sum((x - mx) ** 2 for x in xs)
+            if not sxx:
+                continue
+            slope = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sxx
+            out.append(dict(
+                fecha=datetime.combine(s[-1][0], datetime.min.time()), sn=g["sn"], pos=g["pos"],
+                matricula=g["mat"], rate=round(-slope, 3), horas=round(h, 1), dias=len(s),
+                oq_ini=round(ys[0], 1), oq_fin=round(ys[-1], 1),
+                fuente=f"OQ: {s[0][0]:%d/%m}–{s[-1][0]:%d/%m}, {len(s)} días, {h:.0f} h",
+            ))
+    out.sort(key=lambda r: r["fecha"])
+    return out
+
+
+def _oil_rows(series_rows, flights, legacy_rows):
+    """Consumo calculado con el OQ; si no hay OQ (no es B737) se usa tmp_oil_qty_crz."""
+    rows = oil_consumption(series_rows, flights)
+    return rows if rows else legacy_rows
+
+
+def _oil_trend(rows: list[dict]):
+    """(consumo reciente, consumo de referencia) en qt/h, ponderado por horas de cada tramo."""
+    now = datetime.now()
+    ref_from = now - timedelta(days=RULES["referencia_desde_dias"])
+    ref_to = now - timedelta(days=RULES["referencia_hasta_dias"])
+    rec_from = now - timedelta(days=RULES.get("aceite_recientes_dias", 90))
+    min_seg = RULES.get("aceite_minimo_tramos", 3)
+
+    def wavg(sel):
+        if len(sel) < min_seg:
+            return None
+        if all("horas" in r for r in sel):
+            tot = sum(r["horas"] for r in sel)
+            return sum(r["rate"] * r["horas"] for r in sel) / tot if tot else None
+        return mean(r["rate"] for r in sel)
+
+    pts = [r for r in rows if to_dt(r["fecha"]) and num(r.get("rate")) is not None]
+    rec = wavg([r for r in pts if to_dt(r["fecha"]) >= rec_from])
+    base = wavg([r for r in pts if ref_from <= to_dt(r["fecha"]) < ref_to])
+    return None if rec is None or base is None else (rec, base)
+
+
 # --------------------------------------------------------------------------- salud
 def _trend(rows: list[dict], field: str):
     """(media últimos N vuelos, media del periodo de referencia) o None si faltan datos."""
@@ -350,13 +458,13 @@ def health(series_rows: list[dict], oil_rows: list[dict], events: list[dict]) ->
         lv = 2 if delta >= red else 1 if delta >= amb else 0
         bump(lv, f"{label}: {delta:+.1f} °C respecto a la referencia")
 
-    t = _trend(oil_rows, "rate")
-    if t is None or not t[1]:
+    t = _oil_trend(oil_rows)
+    if t is None or t[1] <= 0:
         reasons.append(dict(nivel="sin_datos", texto="Consumo de aceite: sin datos suficientes"))
     else:
         ratio = t[0] / t[1]
         lv = 2 if ratio >= RULES["aceite_ratio_rojo"] else 1 if ratio >= RULES["aceite_ratio_ambar"] else 0
-        bump(lv, f"Consumo de aceite: ×{ratio:.2f} respecto a la referencia")
+        bump(lv, f"Consumo de aceite: {t[0]:.2f} qt/h, ×{ratio:.2f} respecto a la referencia ({t[1]:.2f})")
 
     since = datetime.now() - timedelta(days=RULES["eventos_dias"])
     n_ev = sum(1 for e in events if e["de_motor"] and e["fecha"] and e["fecha"] >= since)
@@ -391,8 +499,8 @@ def _in_range(rows, desde, hasta_excl):
 def engine_detail(sn: str, desde: date | None, hasta: date | None) -> dict:
     desde, hasta, fetch_from, hasta_excl = _ranges(desde, hasta)
     flights = engine_flights(sn)
-    ser = repo.series("engine", sn, fetch_from, hasta_excl) + _rep_for_engine(sn, fetch_from, hasta_excl)
-    oil_rows = repo.oil("engine", sn, fetch_from, hasta_excl)
+    ser = clean_oil(repo.series("engine", sn, fetch_from, hasta_excl)) + _rep_for_engine(sn, fetch_from, hasta_excl)
+    oil_rows = _oil_rows(ser, flights, repo.oil("engine", sn, fetch_from, hasta_excl))
     evs = cached(("ev_e", sn), lambda: normalize_events(repo.events("engine", sn)))
     cur = current_install(sn)
     if cur is None and flights:
@@ -416,9 +524,11 @@ def aircraft_detail(id_avion: int, desde: date | None, hasta: date | None) -> di
         return None
     desde, hasta, fetch_from, hasta_excl = _ranges(desde, hasta)
     flights = cached(("af", id_avion), lambda: repo.aircraft_flights(id_avion))
-    ser = (repo.series("aircraft", id_avion, fetch_from, hasta_excl)
+    ser = (clean_oil(repo.series("aircraft", id_avion, fetch_from, hasta_excl))
            + _rep_for_aircraft(id_avion, fetch_from, hasta_excl))
-    oil_rows = repo.oil("aircraft", id_avion, fetch_from, hasta_excl)
+    # horas de cada motor mientras ha estado en este avión (para el consumo por tramos)
+    ac_eng_flights = [dict(fecha=f["fecha"], ft=f["ft"], sn=f.get(f"sn{p}")) for f in flights for p in (1, 2)]
+    oil_rows = _oil_rows(ser, ac_eng_flights, repo.oil("aircraft", id_avion, fetch_from, hasta_excl))
     evs = cached(("ev_a", id_avion), lambda: normalize_events(repo.events("aircraft", id_avion, ac["matricula"])))
     motores = []
     for pos in (1, 2):

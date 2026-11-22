@@ -9,10 +9,13 @@ let lastArgs = null;
 export const CHART_DEFS = [
   { section: "EGT", id: "tof_egt", title: "EGT en despegue", unit: "°C", field: "tof_egt", events: true },
   { section: "EGT", id: "crz_egt", title: "EGT en crucero", unit: "°C", field: "crz_egt", events: true },
-  { section: "Aceite", id: "oil_rate", title: "Consumo de aceite en crucero", field: "rate", source: "aceite" },
-  { section: "Aceite", id: "crz_oq", title: "Cantidad de aceite en crucero", field: "crz_oq" },
+  { section: "Aceite", id: "oil_rate", title: "Consumo de aceite", unit: "qt/h", field: "rate", source: "aceite", maUnit: "tramos",
+    note: "Cada punto = un tramo entre rellenos: cuánto baja el OQ por hora de vuelo. Solo B737 (único con OQ)." },
+  { section: "Aceite", id: "crz_oq", title: "Cantidad de aceite (OQ) en crucero", unit: "qt", field: "crz_oq",
+    note: "Los saltos hacia arriba son rellenos de aceite." },
+  { section: "Aceite", id: "crz_ot", title: "Temperatura de aceite (OT) en crucero", unit: "°C", field: "crz_ot" },
+  { section: "Aceite", id: "tof_ot", title: "Temperatura de aceite (OT) en despegue", unit: "°C", field: "tof_ot" },
   { section: "Aceite", id: "crz_op", title: "Presión de aceite en crucero", field: "crz_op" },
-  { section: "Aceite", id: "crz_ot", title: "Temperatura de aceite en crucero", unit: "°C", field: "crz_ot" },
   { section: "Combustible", id: "tof_ff", title: "Fuel flow en despegue", field: "tof_ff" },
   { section: "Combustible", id: "crz_ff", title: "Fuel flow en crucero", field: "crz_ff" },
   { section: "Combustible", id: "fuel_h", title: "Combustible consumido por hora de vuelo (avión)", field: "fuel_h", aircraftLevel: true },
@@ -26,7 +29,7 @@ export const CHART_DEFS = [
 
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const fmtDate = (t) => new Date(t).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" });
-const fmtNum = (v) => (v === null || v === undefined || Number.isNaN(v) ? "—" : Number(v).toLocaleString("es-ES", { maximumFractionDigits: 2 }));
+const fmtNum = (v) => (v === null || v === undefined || Number.isNaN(v) ? "—" : Number(v).toLocaleString("es-ES", { maximumFractionDigits: Math.abs(v) < 1 ? 3 : 2 }));
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 export function disposeCharts() {
@@ -70,7 +73,7 @@ function buildGroups(def, rows, mode, snLabel) {
       win.push(p.v);
       sum += p.v;
       if (win.length > MA_WINDOW) sum -= win.shift();
-      return [p.t, +(sum / win.length).toFixed(2)];
+      return [p.t, +(sum / win.length).toPrecision(4)];
     });
   }
   return groups.filter((g) => g.points.length);
@@ -157,7 +160,7 @@ function tooltipHtml(params, def, engineEvents) {
         + ` <span class="tt-m">${esc(m.matricula || "")}${m.origen || m.destino ? ` ${esc(m.origen || "")}→${esc(m.destino || "")}` : ""}`
         + ` · ${fmtDate(p.value[0])}${m.fuente ? ` · ${esc(m.fuente)}` : ""}</span></div>`;
     } else {
-      html += `<div class="tt-m">${p.marker}${esc(p.seriesName)} · media ${MA_WINDOW} vuelos: ${fmtNum(p.value[1])}</div>`;
+      html += `<div class="tt-m">${p.marker}${esc(p.seriesName)} · media ${MA_WINDOW} ${def.maUnit || "vuelos"}: ${fmtNum(p.value[1])}</div>`;
     }
   }
   const near = engineEvents.filter((e) => Math.abs(Date.parse(e.fecha) - t) < 36 * 3600 * 1000);
@@ -171,9 +174,9 @@ function tableHtml(def, groups) {
   return `<table class="tbl compact"><thead><tr><th>Fecha</th><th>Serie</th><th>Matrícula</th><th>Ruta</th>`
     + `<th class="num">Valor</th><th class="num">Media ${MA_WINDOW}</th></tr></thead><tbody>`
     + rows.map((x) => `<tr><td>${fmtDate(x.p.t)}</td><td>${esc(x.g)}</td><td>${esc(x.p.r.matricula)}</td>`
-      + `<td>${esc(x.p.r.origen || "")}→${esc(x.p.r.destino || "")}</td><td class="num">${fmtNum(x.p.v)}</td>`
+      + `<td>${x.p.r.origen || x.p.r.destino ? `${esc(x.p.r.origen || "")}→${esc(x.p.r.destino || "")}` : esc(x.p.r.fuente || "")}</td><td class="num">${fmtNum(x.p.v)}</td>`
       + `<td class="num">${fmtNum(x.ma)}</td></tr>`).join("")
-    + `</tbody></table><p class="hint">Últimos ${rows.length} vuelos del periodo.</p>`;
+    + `</tbody></table><p class="hint">Últimos ${rows.length} ${def.maUnit || "vuelos"} del periodo.</p>`;
 }
 
 /**
@@ -199,7 +202,8 @@ export function renderCharts(container, data, mode, snLabel) {
       if (!groups.length && def.hideIfEmpty) continue;
       const card = document.createElement("div");
       card.className = "card chart-card";
-      const sub = def.events ? `<span class="chart-sub">Línea discontinua = evento de motor · zona gris = parada &gt; ${data.diasParada} días</span>` : "";
+      const subText = def.events ? `Línea discontinua = evento de motor · zona gris = parada &gt; ${data.diasParada} días` : esc(def.note || "");
+      const sub = subText ? `<span class="chart-sub">${subText}</span>` : "";
       card.innerHTML = `
         <div class="chart-head">
           <div><h4>${esc(def.title)}${def.unit ? ` <span class="chart-unit">(${esc(def.unit)})</span>` : ""}</h4>${sub}</div>

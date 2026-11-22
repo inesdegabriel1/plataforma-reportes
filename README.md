@@ -82,7 +82,10 @@ Los umbrales del indicador de salud están en `backend/app/health_rules.json`.
 - **Horas y ciclos:** `vuelos_loreto` (agrupado por `SN_ENGINE_1/2`; sigue al motor aunque cambie de avión).
 - **Paradas / C-check:** huecos de más de `STOP_DAYS` días entre vuelos consecutivos.
 - **EGT, fuel flow, aceite, N1/N2, vibraciones (Boeing):** `t_qar_flightsfile` (columnas `TOF_*` y `CRZ_*`).
-- **Consumo de aceite:** `tmp_oil_qty_crz`.
+- **Aceite:** OQ = cantidad (`CRZ_OQ_L/R`, solo B737) y OT = temperatura (`CRZ_OT_L/R`,
+  `TOF_OT_L/R`; en A321 el OIT del reporte). El **consumo** (qt/h) se calcula con el OQ: mediana
+  diaria, tramos entre rellenos (subida de más de 1 qt) y pendiente frente a las horas de vuelo.
+  Si un avión no tiene OQ se usa `tmp_oil_qty_crz`. Las lecturas imposibles (OT > 200 °C) se descartan.
 - **Eventos:** `tmp_import_engines` + `tmp_import_file4_ines`.
 - **A321:** reportes ACMS de `t_qar_a321_reports`: REPORT01 (crucero) y REPORT04 (despegue).
   Traen además los contadores de horas y ciclos del motor (`EHRS`/`ECYC`); si el contador se
