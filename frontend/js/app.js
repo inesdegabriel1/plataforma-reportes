@@ -1,4 +1,4 @@
-import { api, AuthError, clearToken, getToken, setToken } from "./api.js";
+import { api, AuthError, clearToken, getToken, pingBackend, setToken } from "./api.js";
 import { disposeCharts, renderCharts, rerenderCharts } from "./charts.js";
 
 // ------------------------------------------------------------------ utilidades
@@ -67,7 +67,57 @@ function showLogin(msg = "") {
   $("#login-error").textContent = msg;
   $("#login-password").value = "";
   $("#login-password").focus();
+  watchBackend();
 }
+
+// ------------------------------------------------------------------ estado del backend
+// Mientras se ve el login, comprueba cada pocos segundos si el backend responde.
+// El botón abre swiftair-ehm://start (lo registra backend/instalar-boton.ps1), que lanza
+// backend/arrancar.ps1. Una web no puede arrancar programas por sí sola.
+const backend = { timer: null, startedAt: 0 };
+
+function setBackendState(st, text) {
+  $("#backend-status").dataset.state = st;
+  $("#backend-text").textContent = text;
+  $("#backend-start").hidden = st !== "down";
+  $("#login-btn").disabled = st !== "up";
+}
+
+async function checkBackend() {
+  if ($("#login-view").hidden) return stopWatching();
+  const r = await pingBackend();
+  const starting = backend.startedAt && Date.now() - backend.startedAt < 60000;
+  if (r.ok) {
+    backend.startedAt = 0;
+    $("#backend-hint").hidden = true;
+    setBackendState("up", r.demo ? "Backend conectado (modo demo)" : "Backend conectado");
+  } else if (starting) {
+    setBackendState("checking", "Arrancando el backend…");
+    if (Date.now() - backend.startedAt > 15000) $("#backend-hint").hidden = false;
+  } else {
+    if (backend.startedAt) $("#backend-hint").hidden = false;
+    backend.startedAt = 0;
+    setBackendState("down", "Backend apagado");
+  }
+  backend.timer = setTimeout(checkBackend, r.ok ? 10000 : starting ? 1500 : 4000);
+}
+
+function stopWatching() {
+  clearTimeout(backend.timer);
+  backend.timer = null;
+}
+
+function watchBackend() {
+  stopWatching();
+  checkBackend();
+}
+
+$("#backend-start").addEventListener("click", () => {
+  backend.startedAt = Date.now();
+  setBackendState("checking", "Arrancando el backend…");
+  stopWatching();
+  backend.timer = setTimeout(checkBackend, 1500);
+});
 
 async function doLogin(ev) {
   ev.preventDefault();

@@ -54,6 +54,17 @@ Con `DEMO=1` la aplicación funciona con datos inventados y la contraseña `demo
 
 Abre <http://localhost:8000> y entra con tu contraseña.
 
+También puedes hacer doble clic en `backend\arrancar.cmd` (lo arranca minimizado; cierra esa
+ventana para apagarlo).
+
+### Botón "Arrancar backend" en la pantalla de inicio
+
+La pantalla de login muestra si el backend está conectado o apagado. Una web no puede abrir
+programas por sí sola, así que el botón usa un enlace `swiftair-ehm://` que Windows asocia a
+`arrancar.cmd`. Para activarlo, haz doble clic **una vez** en `backend\instalar-boton.cmd`
+(solo afecta a tu usuario y no pide permisos de administrador). La primera vez Chrome pregunta
+si abrir el enlace: marca "Permitir siempre". Para quitarlo: `instalar-boton.cmd /desinstalar`.
+
 ## Comprobaciones en HeidiSQL antes de usar datos reales
 
 Algunas reglas dependen de cómo están guardados los datos. Ajusta `backend/.env` si hace falta:

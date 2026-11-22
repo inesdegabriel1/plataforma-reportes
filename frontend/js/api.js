@@ -8,6 +8,21 @@ export const clearToken = () => sessionStorage.removeItem(KEY);
 
 export class AuthError extends Error {}
 
+// Comprueba si el backend responde. Devuelve {ok, demo}; nunca lanza error.
+export async function pingBackend(timeoutMs = 2500) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(new URL(BASE + "/api/health", location.href), { signal: ctrl.signal, cache: "no-store" });
+    const data = await res.json();
+    return { ok: res.ok && data.status === "ok", demo: !!data.demo };
+  } catch {
+    return { ok: false, demo: false };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function api(path, { method = "GET", body, params } = {}) {
   const url = new URL(BASE + path, location.href);
   if (params) {

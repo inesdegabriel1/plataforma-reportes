@@ -25,6 +25,15 @@
       <input id="login-password" type="password" placeholder="Contraseña" required autocomplete="current-password">
       <button id="login-btn" type="submit" class="btn-primary">Entrar</button>
       <p id="login-error" class="error-text" role="alert"></p>
+      <div id="backend-status" class="backend-status" data-state="checking" aria-live="polite">
+        <span class="dot" aria-hidden="true"></span>
+        <span id="backend-text">Comprobando el backend…</span>
+        <a id="backend-start" class="btn-secondary" href="swiftair-ehm://start" hidden>Arrancar backend</a>
+      </div>
+      <p id="backend-hint" class="muted small" hidden>
+        ¿No arranca? Ejecuta una vez <code>backend\instalar-boton.cmd</code> (activa el botón)
+        o arráncalo a mano como indica el README.
+      </p>
     </form>
   </main>
 
