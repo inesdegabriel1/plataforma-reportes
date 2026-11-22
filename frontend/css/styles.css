@@ -190,7 +190,7 @@ code { font-size: 12px; background: var(--surface-2); padding: 1px 5px; border-r
 
 /* Gráficas */
 .chart-section h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-secondary); margin: 8px 0 10px; }
-.chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 16px; }
+.chart-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }  /* una gráfica por fila */
 .chart-card { padding: 14px 14px 6px; }
 .chart-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
 .chart-sub { font-size: 11px; color: var(--text-muted); }
@@ -200,9 +200,9 @@ code { font-size: 12px; background: var(--surface-2); padding: 1px 5px; border-r
   font: inherit; font-size: 12px; cursor: pointer; }
 .btn-ghost:hover:not(:disabled) { border-color: var(--text-secondary); color: var(--text-primary); }
 .btn-ghost:disabled { opacity: .4; cursor: default; }
-.chart-body { height: 300px; }
+.chart-body { height: 360px; }
 .chart-body.empty { display: grid; place-items: center; color: var(--text-muted); height: 120px; }
-.chart-table { max-height: 300px; overflow: auto; }
+.chart-table { max-height: 360px; overflow: auto; }
 .tt { font-size: 12px; line-height: 1.5; }
 .tt-h { font-weight: 600; margin-bottom: 2px; }
 .tt-m { color: var(--text-muted); }

@@ -48,6 +48,11 @@ export async function api(path, { method = "GET", body, params } = {}) {
     clearToken();
     throw new AuthError((data && data.detail) || "Sesión caducada");
   }
-  if (!res.ok) throw new Error((data && data.detail) || `Error ${res.status}`);
+  if (!res.ok) {
+    const d = data && data.detail;
+    // FastAPI devuelve una lista de errores cuando un parámetro no es válido.
+    const msg = Array.isArray(d) ? d.map((e) => e.msg || String(e)).join("; ") : d;
+    throw new Error(msg || `Error ${res.status}`);
+  }
   return data;
 }
