@@ -1,0 +1,17 @@
+{
+  "_comentario": "Umbrales del indicador de salud. Ajustables sin tocar código (reinicia el backend tras cambiarlos).",
+  "_logica": "Se compara la media de los últimos 'vuelos_recientes' vuelos con la media del periodo de referencia (entre hace 'referencia_desde_dias' y hace 'referencia_hasta_dias').",
+  "vuelos_recientes": 20,
+  "referencia_desde_dias": 365,
+  "referencia_hasta_dias": 180,
+  "minimo_vuelos_referencia": 20,
+  "egt_crucero_delta_ambar": 10,
+  "egt_crucero_delta_rojo": 20,
+  "egt_despegue_delta_ambar": 15,
+  "egt_despegue_delta_rojo": 30,
+  "aceite_ratio_ambar": 1.5,
+  "aceite_ratio_rojo": 2.0,
+  "eventos_dias": 90,
+  "eventos_ambar": 2,
+  "eventos_rojo": 5
+}

@@ -1,0 +1,20 @@
+# Secretos y entornos: NUNCA al repositorio
+.env
+*.env
+!.env.example
+backend/.venv/
+.claude/settings.local.json
+__pycache__/
+*.pyc
+
+# Datos: este repo no contiene datos de la base de datos
+*.csv
+*.xlsx
+*.sql.gz
+*.dump
+exports/
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
