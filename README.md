@@ -3,6 +3,10 @@
 Plataforma para seguir la salud de los motores: horas y ciclos, paradas de más de 30 días
 (posible C-check), tendencias de EGT, aceite y combustible, eventos e indicador de salud.
 
+**La aplicación solo LEE la base de datos; nunca modifica nada.** Toda consulta pasa por
+`backend/app/db.py`, que rechaza cualquier sentencia que no sea un único `SELECT` de lectura.
+Además, conviene conectar con un usuario MySQL que solo tenga permiso `SELECT`.
+
 **Este repositorio no contiene datos de la base de datos.** Solo código. Las credenciales
 van en `backend/.env`, que nunca se sube a GitHub.
 
