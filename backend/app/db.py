@@ -1,10 +1,14 @@
 """Acceso a MySQL/MariaDB. Sesión en modo SOLO LECTURA y consultas siempre parametrizadas."""
+import logging
 from contextlib import contextmanager
 
 import pymysql
 import pymysql.cursors
 
 from . import config
+
+log = logging.getLogger("ehm.db")
+_read_only_supported: bool | None = None
 
 
 @contextmanager
@@ -22,10 +26,18 @@ def connection():
         autocommit=True,
     )
     try:
-        with conn.cursor() as cur:
-            # Protección extra: aunque el usuario tuviera permisos de escritura,
-            # esta sesión no puede modificar nada.
-            cur.execute("SET SESSION TRANSACTION READ ONLY")
+        # Protección extra: aunque el usuario tuviera permisos de escritura, la sesión no puede
+        # modificar nada. Los servidores antiguos (MySQL < 5.6.5) no lo soportan; en ese caso
+        # la protección es que el código solo ejecuta SELECT.
+        global _read_only_supported
+        if _read_only_supported is not False:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SET SESSION TRANSACTION READ ONLY")
+                _read_only_supported = True
+            except pymysql.err.MySQLError:
+                _read_only_supported = False
+                log.warning("El servidor MySQL no admite sesiones de solo lectura (versión antigua).")
         yield conn
     finally:
         conn.close()

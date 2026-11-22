@@ -2,6 +2,7 @@
 import logging
 from datetime import date
 
+import pymysql
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -31,10 +32,24 @@ app.add_middleware(
 )
 
 
-@app.exception_handler(Exception)
-async def db_errors(request: Request, exc: Exception):
+async def server_errors(request: Request, exc: Exception):
     log.exception("Error en %s", request.url.path)
-    return JSONResponse(status_code=502, content={"detail": f"Error del servidor: {type(exc).__name__}: {exc}"[:400]})
+    if isinstance(exc, pymysql.err.OperationalError) and exc.args and exc.args[0] == 1045:
+        msg = ("La base de datos rechaza el usuario o la contraseña. "
+               "Revisa DB_USER y DB_PASSWORD en backend/.env y reinicia el backend.")
+    elif isinstance(exc, pymysql.err.OperationalError) and exc.args and exc.args[0] in (2003, 2005):
+        msg = "No se puede llegar al servidor de base de datos. ¿Estás en la red de Swiftair o con VPN?"
+    else:
+        msg = f"Error del servidor: {type(exc).__name__}: {exc}"[:400]
+    return JSONResponse(status_code=502, content={"detail": msg})
+
+
+# Los manejadores de clases concretas se ejecutan DENTRO del middleware CORS, así la respuesta
+# de error lleva las cabeceras CORS y la web de GitHub Pages puede leer el mensaje.
+# (Un manejador de `Exception` genérico se ejecuta fuera de CORS y el navegador lo bloquearía.)
+for _cls in (pymysql.MySQLError, ValueError, KeyError, TypeError, RuntimeError, AttributeError,
+             IndexError, ZeroDivisionError, OSError):
+    app.add_exception_handler(_cls, server_errors)
 
 
 class LoginIn(BaseModel):

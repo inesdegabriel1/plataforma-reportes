@@ -76,6 +76,8 @@ def fleet_type(flota: str | None, variante: str | None = None) -> str:
         return "B757"
     if "737" in s:
         return "B737"
+    if s.strip().startswith("MD") or "MD-8" in s or "MD8" in s:
+        return "MD"
     return "OTRO"
 
 
