@@ -220,18 +220,22 @@ function renderFleet() {
       <h3>Motores</h3>
       <div class="table-wrap"><table class="tbl" id="tbl-engines">
         <thead><tr>${th("sn", "Nº de serie")}${th("montado_en", "Montado en")}${th("posicion", "Pos.")}${th("tipo", "Tipo")}
-          ${th("horas", "Horas", "num")}${th("ciclos", "Ciclos", "num")}${th("ultimo_vuelo", "Último vuelo")}${th("dias_sin_volar", "Días sin volar", "num")}</tr></thead>
+          ${th("horas", "Horas (BD)", "num")}${th("ciclos", "Ciclos (BD)", "num")}${th("horas_acms", "Horas ACMS", "num")}${th("ciclos_acms", "Ciclos ACMS", "num")}
+          ${th("ultimo_vuelo", "Último vuelo")}${th("dias_sin_volar", "Días sin volar", "num")}</tr></thead>
         <tbody>${motores.map((m) => `
           <tr class="row-link" data-href="#/motor/${encodeURIComponent(m.sn)}">
             <td><b>${esc(m.sn)}</b></td>
             <td>${m.montado_en ? esc(m.montado_en) : `<span class="muted">Desmontado (último: ${esc(m.ultimo_avion)})</span>`}</td>
             <td>${m.posicion ?? "—"}</td><td>${esc(m.tipo)}</td>
             <td class="num">${fmtH(m.horas)}</td><td class="num">${fmtInt(m.ciclos)}</td>
+            <td class="num">${m.acms_reiniciado ? '<span class="warn-text" title="Contador ACMS reiniciado: ver ficha del motor">⚠ </span>' : ""}${fmtH(m.horas_acms)}</td>
+            <td class="num">${fmtInt(m.ciclos_acms)}</td>
             <td>${fmtDate(m.ultimo_vuelo)}</td>
             <td class="num ${m.montado_en && m.dias_sin_volar > state.meta.dias_parada ? "warn-text" : ""}">${fmtInt(m.dias_sin_volar)}</td>
           </tr>`).join("")}</tbody>
       </table></div>
-      <p class="hint">Horas y ciclos calculados con los vuelos registrados en la base de datos (no incluyen la vida anterior del motor).</p>
+      <p class="hint">Horas y ciclos (BD): calculados con los vuelos registrados que llevan el nº de serie del motor; no incluyen la vida anterior.
+        Horas y ciclos ACMS: contadores que reporta el avión para cada motor (solo A321); ⚠ = el contador se reinició.</p>
     </div>`;
 
   document.querySelectorAll("[data-tipo]").forEach((b) => (b.onclick = () => { state.tipo = b.dataset.tipo; renderFleet(); }));
@@ -252,10 +256,23 @@ function bindRowLinks() {
 // ------------------------------------------------------------------ bloques comunes
 function summaryKpis(r) {
   const up = r.ultima_parada;
+  const a = r.acms;
+  const rs = a && a.reinicio;
+  const acms = !a ? "" : rs ? `
+      <div class="kpi hero"><span class="kpi-l">Horas del motor (ACMS) · estimadas</span><span class="kpi-v">≈ ${fmtH(a.estimado_horas)}</span>
+        <span class="kpi-f warn-text">⚠ Contador reiniciado el ${fmtDate(rs.fecha)}: antes ${fmtH(rs.antes_horas)} h, ahora ${fmtH(a.horas)} h</span></div>
+      <div class="kpi hero"><span class="kpi-l">Ciclos del motor (ACMS) · estimados</span><span class="kpi-v">≈ ${fmtInt(a.estimado_ciclos)}</span>
+        <span class="kpi-f warn-text">⚠ Antes ${fmtInt(rs.antes_ciclos)}, ahora ${fmtInt(a.ciclos)}. Estimación = antes + ahora; confírmala con Ingeniería.</span></div>` : `
+      <div class="kpi hero"><span class="kpi-l">Horas del motor (ACMS)</span><span class="kpi-v">${fmtH(a.horas)}</span>
+        <span class="kpi-f">Último reporte ${fmtDate(a.fecha)} · ${esc(a.matricula || "")}</span></div>
+      <div class="kpi hero"><span class="kpi-l">Ciclos del motor (ACMS)</span><span class="kpi-v">${fmtInt(a.ciclos)}</span>
+        <span class="kpi-f">Contadores que reporta el avión para este motor</span></div>`;
+  const reg = a ? " registradas en BD" : " totales";
   return `
     <div class="kpis">
-      <div class="kpi hero"><span class="kpi-l">Horas totales</span><span class="kpi-v">${fmtH(r.horas_totales)}</span></div>
-      <div class="kpi hero"><span class="kpi-l">Ciclos totales</span><span class="kpi-v">${fmtInt(r.ciclos_totales)}</span></div>
+      ${acms}
+      <div class="kpi ${a ? "" : "hero"}"><span class="kpi-l">Horas${reg}</span><span class="kpi-v ${a ? "sm" : ""}">${fmtH(r.horas_totales)}</span></div>
+      <div class="kpi ${a ? "" : "hero"}"><span class="kpi-l">Ciclos${reg}</span><span class="kpi-v ${a ? "sm" : ""}">${fmtInt(r.ciclos_totales)}</span></div>
       <div class="kpi"><span class="kpi-l">Últimos 30 días</span><span class="kpi-v sm">${fmtH(r.horas_30d)} h · ${fmtInt(r.ciclos_30d)} ciclos</span></div>
       <div class="kpi"><span class="kpi-l">Últimos 12 meses</span><span class="kpi-v sm">${fmtH(r.horas_12m)} h · ${fmtInt(r.ciclos_12m)} ciclos</span></div>
       <div class="kpi"><span class="kpi-l">Desde la última parada (posible C-check)</span>
@@ -295,9 +312,11 @@ function healthCard(salud) {
 }
 
 function sourceNote(tipo, hasSeries) {
+  const empty = hasSeries ? "" : " <b>No hay reportes en el periodo seleccionado.</b>";
+  if (tipo === "A321") return `<div class="card note">Parámetros de motor de los reportes ACMS del A321: REPORT01 (crucero) y REPORT04 (despegue).${empty}</div>`;
+  if (tipo === "ATR") return `<div class="card note">Parámetros de motor del reporte REPORT02 del ATR, que se genera en crucero (no hay reporte de despegue).
+    En ATR, la gráfica de "EGT" muestra la <b>ITT</b>, "N1" es <b>NL</b> y "N2" es <b>NH</b>.${empty}</div>`;
   if (hasSeries) return "";
-  if (tipo === "A321") return `<div class="card note">Los parámetros de motor del A321 vienen de los reportes ACMS (REPORT01 / REPORT04) de <code>t_qar_a321_reports</code>. El lector de esos reportes está pendiente: hacen falta ejemplos del texto.</div>`;
-  if (tipo === "ATR") return `<div class="card note">Los parámetros de motor del ATR vienen de <code>t_qar_atr_reports</code> y de la tabla <code>atr</code>. Pendiente de confirmar el tipo de reporte y su formato.</div>`;
   return `<div class="card note">No hay parámetros de motor en <code>t_qar_flightsfile</code> para este periodo.</div>`;
 }
 
@@ -348,8 +367,14 @@ const viewAircraft = guard(async (id) => {
           <div class="engine-head"><span class="swatch" aria-hidden="true"></span>
             <h3>Motor ${m.pos} · <a href="#/motor/${encodeURIComponent(m.sn)}">${esc(m.sn)}</a></h3>${badge(m.salud.estado)}</div>
           <div class="mini-kpis">
-            <div><span class="kpi-l">Horas</span><b>${fmtH(m.resumen.horas_totales)}</b></div>
-            <div><span class="kpi-l">Ciclos</span><b>${fmtInt(m.resumen.ciclos_totales)}</b></div>
+            ${(() => {
+              const a = m.resumen.acms;
+              if (!a) return `<div><span class="kpi-l">Horas</span><b>${fmtH(m.resumen.horas_totales)}</b></div>
+                <div><span class="kpi-l">Ciclos</span><b>${fmtInt(m.resumen.ciclos_totales)}</b></div>`;
+              const est = !!a.reinicio;
+              return `<div><span class="kpi-l">Horas ACMS${est ? " ⚠ estimadas" : ""}</span><b>${est ? "≈ " + fmtH(a.estimado_horas) : fmtH(a.horas)}</b></div>
+                <div><span class="kpi-l">Ciclos ACMS${est ? " ⚠ estimados" : ""}</span><b>${est ? "≈ " + fmtInt(a.estimado_ciclos) : fmtInt(a.ciclos)}</b></div>`;
+            })()}
             <div><span class="kpi-l">Desde última parada</span><b>${m.resumen.ultima_parada ? `${fmtH(m.resumen.horas_desde_ultima_parada)} h · ${fmtInt(m.resumen.ciclos_desde_ultima_parada)} c` : "—"}</b></div>
           </div>
           ${healthCard(m.salud)}

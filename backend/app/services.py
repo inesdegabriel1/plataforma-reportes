@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from statistics import mean
 
 from . import config
+from .reports import parse_a321, parse_atr02, sn_key
 
 if config.DEMO:
     from . import repo_demo as repo
@@ -37,6 +38,94 @@ def cached(key, fn):
     with _cache_lock:
         _cache[key] = (now, val)
     return val
+
+
+# --------------------------------------------------------------------------- reportes ACMS (A321 / ATR)
+# Se leen una vez y después solo los nuevos (ID_REPORT mayor que el último leído).
+_rep_store = {k: {"last": 0, "rows": [], "ts": 0.0} for k in ("a321", "atr")}
+_rep_lock = threading.Lock()
+_REP_FIELDS = ("egt", "n1", "n2", "ff", "op", "ot", "vib_n1", "vib_n2", "torque")
+
+
+def report_rows(kind: str) -> list[dict]:
+    """Filas tipo 'serie' (una por motor y reporte) sacadas de los reportes ACMS."""
+    st = _rep_store[kind]
+    with _rep_lock:
+        if time.time() - st["ts"] < config.CACHE_SECONDS:
+            return st["rows"]
+        fetch, parse = (repo.a321_reports, parse_a321) if kind == "a321" else (repo.atr_reports, parse_atr02)
+        for r in fetch(st["last"]):
+            st["last"] = max(st["last"], int(r["id"]))
+            raw = r["contenido"] or b""
+            text = raw.decode("latin-1") if isinstance(raw, (bytes, bytearray)) else str(raw)
+            try:
+                p = parse(text)
+            except Exception:  # un reporte mal formado no debe tumbar la aplicación
+                p = None
+            if not p:
+                continue
+            pre = "crz_" if p["tipo"] == "CRZ" else "tof_"
+            for pos, m in p["motores"].items():
+                if m.get("egt") is None and m.get("ff") is None:
+                    continue
+                row = dict(
+                    fecha=p["fecha"], matricula=p["matricula"] or r["matricula"], id_avion=r["id_avion"],
+                    origen=p["origen"], destino=p["destino"], id_vuelo=f"R{r['id']}", id_flightfile=None,
+                    pos=pos, sn=m.get("esn"), sn_key=sn_key(m.get("esn")), ft=None,
+                    fuente=f"{'A321' if kind == 'a321' else 'ATR'} {r['tipo']}",
+                    acms_horas=m.get("horas"), acms_ciclos=m.get("ciclos"),
+                )
+                row[pre + "tat"] = p["tat"]
+                if pre == "crz_":
+                    row.update(crz_alt=p["alt"], crz_mach=p["mach"])
+                for k in _REP_FIELDS:
+                    if m.get(k) is not None:
+                        row[pre + k] = m[k]
+                st["rows"].append(row)
+        st["rows"].sort(key=lambda x: x["fecha"])
+        st["ts"] = time.time()
+        return st["rows"]
+
+
+def all_report_rows() -> list[dict]:
+    return report_rows("a321") + report_rows("atr")
+
+
+def _rep_for_engine(sn: str, desde: date, hasta_excl: date) -> list[dict]:
+    k = sn_key(sn)
+    return [r for r in all_report_rows() if r["sn_key"] == k and desde <= r["fecha"].date() < hasta_excl]
+
+
+def _rep_for_aircraft(id_avion: int, desde: date, hasta_excl: date) -> list[dict]:
+    return [r for r in all_report_rows()
+            if r["id_avion"] is not None and int(r["id_avion"]) == int(id_avion)
+            and desde <= r["fecha"].date() < hasta_excl]
+
+
+def acms_counters(sn: str) -> dict | None:
+    """Horas y ciclos del motor según su último reporte ACMS (solo A321).
+
+    Estos contadores los lleva la unidad de adquisición del avión y pueden reiniciarse (cambio de
+    unidad, reconfiguración...). Si el valor baja bruscamente se marca el reinicio y se da una
+    estimación = valor antes del reinicio + valor actual. La interfaz lo muestra como estimación.
+    """
+    k = sn_key(sn)
+    rows = [r for r in all_report_rows() if r["sn_key"] == k and r.get("acms_horas") is not None]
+    if not rows:
+        return None
+    reinicio, prev = None, None
+    for r in rows:  # ya ordenadas por fecha
+        if prev and r["acms_horas"] < prev["acms_horas"] * 0.5:
+            reinicio = dict(fecha=r["fecha"], antes_horas=prev["acms_horas"], antes_ciclos=prev["acms_ciclos"],
+                            antes_fecha=prev["fecha"])
+        prev = r
+    last = rows[-1]
+    out = dict(horas=last["acms_horas"], ciclos=last["acms_ciclos"], fecha=last["fecha"],
+               matricula=last["matricula"], reinicio=reinicio)
+    if reinicio:
+        out["estimado_horas"] = reinicio["antes_horas"] + last["acms_horas"]
+        out["estimado_ciclos"] = reinicio["antes_ciclos"] + (last["acms_ciclos"] or 0)
+    return out
 
 
 # --------------------------------------------------------------------------- utilidades
@@ -128,9 +217,20 @@ def fleet() -> list[dict]:
                 id_avion=cur["id_avion"] if cur else (int(r["last_id_avion"]) if r.get("last_id_avion") else None),
                 tipo=(cur["tipo"] if cur else (last_ac["tipo"] if last_ac else "OTRO")),
             ))
+        # Horas y ciclos totales del motor según los reportes ACMS (A321), si existen
+        for m in out:
+            a = acms_counters(m["sn"])
+            m["horas_acms"] = a["horas"] if a else None
+            m["ciclos_acms"] = a["ciclos"] if a else None
+            m["acms_reiniciado"] = bool(a and a["reinicio"])
         out.sort(key=lambda x: (x["montado_en"] is None, x["montado_en"] or "", x["posicion"] or 9))
         return out
     return cached("fleet", load)
+
+
+def engine_flights(sn: str) -> list[dict]:
+    """Historial completo de vuelos del motor (en caché: no depende del periodo elegido)."""
+    return cached(("ef", sn), lambda: repo.engine_flights(sn))
 
 
 # --------------------------------------------------------------------------- utilización
@@ -290,18 +390,20 @@ def _in_range(rows, desde, hasta_excl):
 
 def engine_detail(sn: str, desde: date | None, hasta: date | None) -> dict:
     desde, hasta, fetch_from, hasta_excl = _ranges(desde, hasta)
-    flights = repo.engine_flights(sn)
-    ser = repo.series("engine", sn, fetch_from, hasta_excl)
+    flights = engine_flights(sn)
+    ser = repo.series("engine", sn, fetch_from, hasta_excl) + _rep_for_engine(sn, fetch_from, hasta_excl)
     oil_rows = repo.oil("engine", sn, fetch_from, hasta_excl)
-    evs = normalize_events(repo.events("engine", sn))
+    evs = cached(("ev_e", sn), lambda: normalize_events(repo.events("engine", sn)))
     cur = current_install(sn)
     if cur is None and flights:
         last = max(flights, key=lambda f: to_dt(f["fecha"]))
         ac = aircraft_by_id(last["id_avion"])
         cur = dict(id_avion=last["id_avion"], matricula=last["matricula"], pos=last["pos"],
                    tipo=ac["tipo"] if ac else "OTRO", desmontado=True)
+    resumen = summarize(flights)
+    resumen["acms"] = acms_counters(sn)
     return dict(
-        sn=sn, actual=cur, resumen=summarize(flights), instalaciones=installations(flights),
+        sn=sn, actual=cur, resumen=resumen, instalaciones=installations(flights),
         salud=health(ser, oil_rows, evs),
         series=_in_range(ser, desde, hasta_excl), aceite=_in_range(oil_rows, desde, hasta_excl),
         eventos=evs, rango=dict(desde=desde, hasta=hasta),
@@ -313,19 +415,23 @@ def aircraft_detail(id_avion: int, desde: date | None, hasta: date | None) -> di
     if ac is None:
         return None
     desde, hasta, fetch_from, hasta_excl = _ranges(desde, hasta)
-    flights = repo.aircraft_flights(id_avion)
-    ser = repo.series("aircraft", id_avion, fetch_from, hasta_excl)
+    flights = cached(("af", id_avion), lambda: repo.aircraft_flights(id_avion))
+    ser = (repo.series("aircraft", id_avion, fetch_from, hasta_excl)
+           + _rep_for_aircraft(id_avion, fetch_from, hasta_excl))
     oil_rows = repo.oil("aircraft", id_avion, fetch_from, hasta_excl)
-    evs = normalize_events(repo.events("aircraft", id_avion, ac["matricula"]))
+    evs = cached(("ev_a", id_avion), lambda: normalize_events(repo.events("aircraft", id_avion, ac["matricula"])))
     motores = []
     for pos in (1, 2):
         sn = (ac.get(f"sn{pos}") or "").strip()
         if not sn:
             continue
+        k = sn_key(sn)
+        resumen = summarize(engine_flights(sn))
+        resumen["acms"] = acms_counters(sn)
         motores.append(dict(
-            pos=pos, sn=sn, resumen=summarize(repo.engine_flights(sn)),
-            salud=health([r for r in ser if r["sn"] == sn], [r for r in oil_rows if r["sn"] == sn],
-                         [e for e in evs if e["sn"] == sn]),
+            pos=pos, sn=sn, resumen=resumen,
+            salud=health([r for r in ser if sn_key(r["sn"]) == k], [r for r in oil_rows if sn_key(r["sn"]) == k],
+                         [e for e in evs if sn_key(e["sn"]) == k]),
         ))
     return dict(
         avion=ac, resumen=summarize(flights), motores=motores,

@@ -121,6 +121,31 @@ def oil(kind: str, key, desde: date, hasta_excl: date) -> list[dict]:
     return query(f"SELECT * FROM ({' UNION ALL '.join(halves)}) x ORDER BY x.fecha", p + p)
 
 
+# --------------------------------------------------------------------------- reportes ACMS
+def a321_reports(after_id: int) -> list[dict]:
+    """Reportes de motor A321 (01 crucero, 04 despegue) con ID_REPORT > after_id."""
+    return query("""
+        SELECT r.ID_REPORT id, r.TYPE_FILE tipo, fo.ID_Avion id_avion, a.Matricula matricula,
+               r.CONTENT_FILE contenido
+        FROM t_qar_a321_reports r
+        JOIN t_qar_folder fo ON fo.Id_Folder = r.ID_FOLDER
+        LEFT JOIN aviones a ON a.ID_Avion = fo.ID_Avion
+        WHERE r.TYPE_FILE IN ('REPORT01', 'REPORT04') AND r.ID_REPORT > %s
+        ORDER BY r.ID_REPORT""", [after_id])
+
+
+def atr_reports(after_id: int) -> list[dict]:
+    """Reportes de motor ATR (REPORT02, en crucero) con ID_REPORT > after_id."""
+    return query("""
+        SELECT r.ID_REPORT id, r.TYPE_FILE tipo, fo.ID_Avion id_avion, a.Matricula matricula,
+               r.CONTENT_FILE contenido
+        FROM t_qar_atr_reports r
+        JOIN t_qar_folder_atr fo ON fo.Id_Folder = r.ID_FOLDER
+        LEFT JOIN aviones a ON a.ID_Avion = fo.ID_Avion
+        WHERE r.TYPE_FILE = 'REPORT02' AND r.ID_REPORT > %s
+        ORDER BY r.ID_REPORT""", [after_id])
+
+
 # --------------------------------------------------------------------------- eventos
 _EVENT_COLS = ("ID_FLIGHTFILE, ID_FLIGHT, ID_FLOTA, MATRICULA, FECHA_VUELO, ORIGEN, DESTINO, "
                "FLAP_EVE, ALT_EVE, G_EVE, OVW_EVE, HARD_EVE, LDG_EVE, EGT_EVE, CORE_EVE, VIB_EVE, "

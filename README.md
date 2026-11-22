@@ -73,7 +73,11 @@ Los umbrales del indicador de salud están en `backend/app/health_rules.json`.
 - **EGT, fuel flow, aceite, N1/N2, vibraciones (Boeing):** `t_qar_flightsfile` (columnas `TOF_*` y `CRZ_*`).
 - **Consumo de aceite:** `tmp_oil_qty_crz`.
 - **Eventos:** `tmp_import_engines` + `tmp_import_file4_ines`.
-- **A321 y ATR:** pendiente el lector de reportes (`t_qar_a321_reports` REPORT01/04, `t_qar_atr_reports`).
+- **A321:** reportes ACMS de `t_qar_a321_reports`: REPORT01 (crucero) y REPORT04 (despegue).
+  Traen además los contadores de horas y ciclos del motor (`EHRS`/`ECYC`); si el contador se
+  reinicia, la web lo avisa y da una estimación marcada como tal.
+- **ATR:** `t_qar_atr_reports` REPORT02 (solo crucero; no hay reporte de despegue). La "EGT" es la ITT.
+- El lector de reportes está en `backend/app/reports.py`.
 
 ## Usarla desde GitHub Pages (solo en tu PC)
 

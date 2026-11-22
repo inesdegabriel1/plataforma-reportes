@@ -180,6 +180,7 @@ code { font-size: 12px; background: var(--surface-2); padding: 1px 5px; border-r
 .chart-card { padding: 14px 14px 6px; }
 .chart-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
 .chart-sub { font-size: 11px; color: var(--text-muted); }
+.chart-unit { font-weight: 400; color: var(--text-secondary); }
 .chart-actions { display: flex; gap: 4px; }
 .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text-secondary); border-radius: 6px; padding: 3px 8px;
   font: inherit; font-size: 12px; cursor: pointer; }

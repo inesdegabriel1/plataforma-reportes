@@ -21,6 +21,7 @@ export const CHART_DEFS = [
   { section: "Otros parámetros", id: "crz_n2", title: "N2 en crucero", unit: "%", field: "crz_n2" },
   { section: "Otros parámetros", id: "crz_vib_n1", title: "Vibración N1 en crucero", field: "crz_vib_n1" },
   { section: "Otros parámetros", id: "crz_vib_n2", title: "Vibración N2 en crucero", field: "crz_vib_n2" },
+  { section: "Otros parámetros", id: "crz_torque", title: "Torque en crucero (ATR)", unit: "%", field: "crz_torque", hideIfEmpty: true },
 ];
 
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -131,7 +132,7 @@ function chartOption(def, groups, stops, events) {
       axisLabel: { color: text2, hideOverlap: true }, splitLine: { show: false },
     },
     yAxis: {
-      type: "value", scale: true, name: def.unit || "", nameTextStyle: { color: text2, align: "right" },
+      type: "value", scale: true,
       axisLabel: { color: text2 }, splitLine: { lineStyle: { color: css("--grid") } },
     },
     dataZoom: [
@@ -153,7 +154,8 @@ function tooltipHtml(params, def, engineEvents) {
     if (p.seriesType === "scatter") {
       const m = p.data.meta || {};
       html += `<div>${p.marker}<b>${esc(p.seriesName)}</b>: ${fmtNum(p.value[1])}${def.unit ? " " + def.unit : ""}`
-        + ` <span class="tt-m">${esc(m.matricula || "")} ${esc(m.origen || "")}→${esc(m.destino || "")} · ${fmtDate(p.value[0])}</span></div>`;
+        + ` <span class="tt-m">${esc(m.matricula || "")}${m.origen || m.destino ? ` ${esc(m.origen || "")}→${esc(m.destino || "")}` : ""}`
+        + ` · ${fmtDate(p.value[0])}${m.fuente ? ` · ${esc(m.fuente)}` : ""}</span></div>`;
     } else {
       html += `<div class="tt-m">${p.marker}${esc(p.seriesName)} · media ${MA_WINDOW} vuelos: ${fmtNum(p.value[1])}</div>`;
     }
@@ -194,12 +196,13 @@ export function renderCharts(container, data, mode, snLabel) {
     for (const def of CHART_DEFS.filter((d) => d.section === section)) {
       const rows = def.source === "aceite" ? data.aceite : data.series;
       const groups = buildGroups(def, rows || [], mode, snLabel);
+      if (!groups.length && def.hideIfEmpty) continue;
       const card = document.createElement("div");
       card.className = "card chart-card";
       const sub = def.events ? `<span class="chart-sub">Línea discontinua = evento de motor · zona gris = parada &gt; ${data.diasParada} días</span>` : "";
       card.innerHTML = `
         <div class="chart-head">
-          <div><h4>${esc(def.title)}</h4>${sub}</div>
+          <div><h4>${esc(def.title)}${def.unit ? ` <span class="chart-unit">(${esc(def.unit)})</span>` : ""}</h4>${sub}</div>
           <div class="chart-actions">
             <button class="btn-ghost" data-act="table" type="button">Tabla</button>
             <button class="btn-ghost" data-act="png" type="button">PNG</button>

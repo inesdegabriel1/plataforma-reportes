@@ -206,6 +206,14 @@ def oil(kind: str, key, desde: date, hasta_excl: date) -> list[dict]:
             for f in flights for pos in (1, 2) if _match(kind, key, f, pos, desde, hasta_excl)]
 
 
+def a321_reports(after_id: int) -> list[dict]:
+    return []  # la demo genera directamente los parámetros en series()
+
+
+def atr_reports(after_id: int) -> list[dict]:
+    return []
+
+
 def events(kind: str, key, matricula: str | None = None) -> list[dict]:
     _, evs = _data()
     if kind == "engine":

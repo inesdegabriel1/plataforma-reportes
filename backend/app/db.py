@@ -64,6 +64,8 @@ def connection():
     finally:
         try:
             conn.rollback()
+        except pymysql.err.MySQLError:
+            pass  # si la conexión quedó a medias tras un error, basta con cerrarla
         finally:
             conn.close()
 
