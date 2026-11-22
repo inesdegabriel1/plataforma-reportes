@@ -57,7 +57,7 @@ class LoginIn(BaseModel):
 
 
 @app.get("/api/health")
-def api_health():
+async def api_health():  # async: responde aunque el backend esté ocupado con otras consultas
     return {"status": "ok", "demo": config.DEMO}
 
 

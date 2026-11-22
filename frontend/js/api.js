@@ -9,7 +9,7 @@ export const clearToken = () => sessionStorage.removeItem(KEY);
 export class AuthError extends Error {}
 
 // Comprueba si el backend responde. Devuelve {ok, demo}; nunca lanza error.
-export async function pingBackend(timeoutMs = 2500) {
+export async function pingBackend(timeoutMs = 1500) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -38,8 +38,8 @@ export async function api(path, { method = "GET", body, params } = {}) {
   try {
     res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
   } catch {
-    throw new Error(BASE.includes("localhost")
-      ? "No se puede conectar con el backend de tu PC (http://localhost:8000). Arráncalo y vuelve a intentarlo. Si el navegador pregunta por acceso a la red local, acéptalo."
+    throw new Error(/localhost|127.0.0.1/.test(BASE)
+      ? `No se puede conectar con el backend de tu PC (${BASE}). Arráncalo y vuelve a intentarlo. Si el navegador pregunta por acceso a la red local, acéptalo.`
       : "No se puede conectar con el servidor. ¿Está arrancado el backend?");
   }
   let data = null;

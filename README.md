@@ -93,7 +93,7 @@ Los umbrales del indicador de salud están en `backend/app/health_rules.json`.
 ## Usarla desde GitHub Pages (solo en tu PC)
 
 La web publicada en <https://inesdegabriel1.github.io/plataforma-reportes/> llama al backend de
-tu PC (`http://localhost:8000`). Los datos no salen de tu ordenador: GitHub solo sirve la web.
+tu PC (`http://127.0.0.1:8000`). Los datos no salen de tu ordenador: GitHub solo sirve la web.
 
 1. Sube el repositorio (`git push`). Comprueba antes con `git status` que no aparece ningún `.env`.
 2. La primera vez: en GitHub, Settings → Pages → Source: **GitHub Actions**. El workflow

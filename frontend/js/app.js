@@ -80,20 +80,20 @@ function setBackendState(st, text) {
   $("#backend-status").dataset.state = st;
   $("#backend-text").textContent = text;
   $("#backend-start").hidden = st !== "down";
-  $("#login-btn").disabled = st !== "up";
+  $("#login-btn").disabled = st === "down";
 }
 
 async function checkBackend() {
   if ($("#login-view").hidden) return stopWatching();
   const r = await pingBackend();
-  const starting = backend.startedAt && Date.now() - backend.startedAt < 60000;
+  const starting = backend.startedAt && Date.now() - backend.startedAt < 45000;
   if (r.ok) {
     backend.startedAt = 0;
     $("#backend-hint").hidden = true;
     setBackendState("up", r.demo ? "Backend conectado (modo demo)" : "Backend conectado");
   } else if (starting) {
     setBackendState("checking", "Arrancando el backend…");
-    if (Date.now() - backend.startedAt > 15000) $("#backend-hint").hidden = false;
+    if (Date.now() - backend.startedAt > 8000) $("#backend-hint").hidden = false;
   } else {
     if (backend.startedAt) $("#backend-hint").hidden = false;
     backend.startedAt = 0;
